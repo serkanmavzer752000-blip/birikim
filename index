@@ -1,0 +1,370 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+  <meta charset="UTF-8" />
+  <title>Altın ve Döviz Birikim Takibi</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <style>
+    body { font-family: Arial, sans-serif; background-color: #1e1e2f; color: #fff; padding: 20px; margin: 0; }
+    .container { max-width: 960px; margin: auto; }
+    input, select, button { margin: 5px 4px; padding: 6px 10px; border-radius: 4px; border: 1px solid #555; background: #2c2c3e; color: #fff; }
+    table { width: 100%; margin-top: 20px; border-collapse: collapse; }
+    th, td { padding: 8px; text-align: left; border: 1px solid #444; }
+    th { background-color: #2a2a40; cursor: pointer; }
+    .profit { color: #4caf50; }
+    .loss { color: #e74c3c; }
+    .form-row { display: flex; flex-wrap: wrap; align-items: center; margin-top: 10px; }
+    canvas { margin-top: 30px; max-width: 100%; }
+    .selected { background-color: #333355; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>Altın ve Döviz Birikim Takibi</h1>
+
+    <div class="form-row">
+      <label for="date">Tarih:</label>
+      <input type="date" id="date" />
+      <label for="currency">Döviz Türü:</label>
+      <select id="currency" onchange="updateLabels()">
+        <option value="GA">Altın</option>
+        <option value="USD">Dolar</option>
+        <option value="EUR">Euro</option>
+        <option value="GBP">Sterlin</option>
+      </select>
+      <label id="ayarLabel" for="ayar">Altın Ayarı:</label>
+      <select id="ayar">
+        <option value="0.995">24 Ayar</option>
+        <option value="0.916">22 Ayar</option>
+        <option value="0.750">18 Ayar</option>
+        <option value="0.585">14 Ayar</option>
+      </select>
+    </div>
+
+    <div class="form-row">
+      <label id="gramLabel" for="gram">Gram (Brüt):</label>
+      <input type="number" id="gram" step="0.01">
+      <label id="alisLabel" for="alis">Alış Fiyatı:</label>
+      <input type="number" id="alis" step="0.01">
+    </div>
+
+    <div class="form-row">
+      <label>Altın Kuru:</label><input type="number" id="kurGA" value="4410">
+      <label>Dolar Kuru:</label><input type="number" id="kurUSD" value="40.60">
+      <label>Euro Kuru:</label><input type="number" id="kurEUR" value="46.86">
+      <label>Sterlin Kuru:</label><input type="number" id="kurGBP" value="53.65">
+      <button onclick="kurGuncelle()">Kurları Güncelle</button>
+    </div>
+
+    <div class="form-row">
+      <button onclick="kaydet()">Ekle</button>
+      <button onclick="guncelle()" id="updateBtn" disabled>Güncelle</button>
+      <input type="file" id="csvInput" accept=".csv" onchange="csvYukle()" />
+      <button onclick="csvIndir()">CSV İndir</button>
+    </div>
+
+    <table id="table">
+      <thead>
+        <tr>
+          <th onclick="sortTable(0)">Tarih</th>
+          <th onclick="sortTable(1)">Döviz Türü</th>
+          <th onclick="sortTable(2)">Gram</th>
+          <th onclick="sortTable(3)">Has Gram</th>
+          <th onclick="sortTable(4)">Alış Fiyatı</th>
+          <th onclick="sortTable(5)">Alım Tutarı</th>
+          <th onclick="sortTable(6)">Kur</th>
+          <th onclick="sortTable(7)">Güncel Tutar</th>
+          <th onclick="sortTable(8)">Kâr / Zarar</th>
+          <th>İşlem</th>
+        </tr>
+      </thead>
+      <tbody></tbody>
+    </table>
+
+    <canvas id="chart" height="300"></canvas>
+	<div id="toplamKarZarar" style="margin-top: 20px; font-size: 20px; font-weight: bold;">
+  Toplam Kâr/Zarar: ₺0.00
+</div>
+<div id="ozetAlani" style="margin-top: 15px; font-size: 16px; line-height: 1.6;">
+  <!-- Veriler buraya JS ile yazılacak -->
+</div>
+
+
+<script>
+  let secilenSatir = null;
+  let chart = null;
+  let sortAsc = true;
+  let lastSortedCol = -1;
+
+  function updateLabels() {
+    const curr = document.getElementById("currency").value;
+    const ayarSelect = document.getElementById("ayar");
+    const ayarLabel = document.getElementById("ayarLabel");
+    document.getElementById("gramLabel").innerText = curr === "GA" ? "Gram (Brüt):" : "Tutar:";
+    document.getElementById("alisLabel").innerText = curr === "GA" ? "Alış Fiyatı (TL/gram):" : "Alış Fiyatı (TL/" + curr + "):";
+    ayarSelect.style.display = curr === "GA" ? "inline-block" : "none";
+    ayarLabel.style.display = curr === "GA" ? "inline-block" : "none";
+  }
+
+function kurGuncelle() {
+  const rows = document.querySelectorAll("#table tbody tr");
+  rows.forEach(row => {
+    const curr = row.cells[1].innerText;
+    const ayarDeger = curr === "GA" ? parseFloat(document.getElementById("ayar").value) : 1;
+    const gram = parseFloat(row.cells[2].innerText);
+    const alis = parseFloat(row.cells[4].innerText);
+    const kur = parseFloat(document.getElementById("kur" + curr).value);
+    const hasGram = gram * ayarDeger;
+    const alisTutar = hasGram * alis;
+    const guncelTutar = hasGram * kur;
+    const fark = guncelTutar - alisTutar;
+
+    row.cells[3].innerText = hasGram.toFixed(3);
+    row.cells[5].innerText = alisTutar.toFixed(2);
+    row.cells[6].innerText = kur.toFixed(2);
+    row.cells[7].innerText = guncelTutar.toFixed(2);
+    row.cells[8].innerText = fark.toFixed(2);
+    row.cells[8].className = fark >= 0 ? "profit" : "loss";
+  });
+
+  grafikGuncelle();
+    // Toplam Kâr/Zarar hesapla
+  let toplamFark = 0;
+  rows.forEach(row => {
+    toplamFark += parseFloat(row.cells[8].innerText);
+  });
+
+  const toplamDiv = document.getElementById("toplamKarZarar");
+  const renk = toplamFark >= 0 ? "#4caf50" : "#e74c3c";
+  toplamDiv.innerHTML = `Toplam Kâr/Zarar: <span style="color:${renk}">₺${toplamFark.toFixed(2)}</span>`;
+
+}
+
+
+  function kaydet() {
+    const tarih = document.getElementById("date").value;
+    const curr = document.getElementById("currency").value;
+    const ayarDeger = curr === "GA" ? parseFloat(document.getElementById("ayar").value) : 1;
+    const gram = parseFloat(document.getElementById("gram").value);
+    const alis = parseFloat(document.getElementById("alis").value);
+    const kur = parseFloat(document.getElementById("kur" + curr).value);
+    if (!tarih || isNaN(gram) || isNaN(alis) || isNaN(kur)) return alert("Tüm alanları doldurun");
+
+    const hasGram = gram * ayarDeger;
+    const alisTutar = hasGram * alis;
+    const guncelTutar = hasGram * kur;
+    const fark = guncelTutar - alisTutar;
+
+    const tbody = document.querySelector("#table tbody");
+    const tr = document.createElement("tr");
+    tr.innerHTML = `
+      <td>${tarih}</td>
+      <td>${curr}</td>
+      <td>${gram.toFixed(2)}</td>
+      <td>${hasGram.toFixed(3)}</td>
+      <td>${alis.toFixed(2)}</td>
+      <td>${alisTutar.toFixed(2)}</td>
+      <td>${kur.toFixed(2)}</td>
+      <td>${guncelTutar.toFixed(2)}</td>
+      <td class="${fark >= 0 ? 'profit' : 'loss'}">${fark.toFixed(2)}</td>
+      <td><button onclick="satirSil(this)">Sil</button></td>
+    `;
+    tr.onclick = () => satirSec(tr);
+    tbody.appendChild(tr);
+    temizleForm();
+    grafikGuncelle();
+  }
+
+  function satirSec(tr) {
+    if (secilenSatir) secilenSatir.classList.remove("selected");
+    secilenSatir = tr;
+    tr.classList.add("selected");
+
+    document.getElementById("date").value = tr.children[0].innerText;
+    document.getElementById("currency").value = tr.children[1].innerText;
+    updateLabels();
+    document.getElementById("gram").value = parseFloat(tr.children[2].innerText);
+    document.getElementById("alis").value = parseFloat(tr.children[4].innerText);
+
+    document.getElementById("updateBtn").disabled = false;
+  }
+
+  function guncelle() {
+    if (!secilenSatir) return;
+    const tarih = document.getElementById("date").value;
+    const curr = document.getElementById("currency").value;
+    const ayarDeger = curr === "GA" ? parseFloat(document.getElementById("ayar").value) : 1;
+    const gram = parseFloat(document.getElementById("gram").value);
+    const alis = parseFloat(document.getElementById("alis").value);
+    const kur = parseFloat(document.getElementById("kur" + curr).value);
+    const hasGram = gram * ayarDeger;
+    const alisTutar = hasGram * alis;
+    const guncelTutar = hasGram * kur;
+    const fark = guncelTutar - alisTutar;
+
+    secilenSatir.children[0].innerText = tarih;
+    secilenSatir.children[1].innerText = curr;
+    secilenSatir.children[2].innerText = gram.toFixed(2);
+    secilenSatir.children[3].innerText = hasGram.toFixed(3);
+    secilenSatir.children[4].innerText = alis.toFixed(2);
+    secilenSatir.children[5].innerText = alisTutar.toFixed(2);
+    secilenSatir.children[6].innerText = kur.toFixed(2);
+    secilenSatir.children[7].innerText = guncelTutar.toFixed(2);
+    secilenSatir.children[8].innerText = fark.toFixed(2);
+    secilenSatir.children[8].className = fark >= 0 ? "profit" : "loss";
+
+    temizleForm();
+    secilenSatir.classList.remove("selected");
+    secilenSatir = null;
+    document.getElementById("updateBtn").disabled = true;
+    grafikGuncelle();
+  }
+  function satirSil(btn) {
+    const tr = btn.closest("tr");
+    tr.remove();
+    if (secilenSatir === tr) {
+      temizleForm();
+      secilenSatir = null;
+      document.getElementById("updateBtn").disabled = true;
+    }
+    grafikGuncelle();
+  }
+
+  function temizleForm() {
+    document.getElementById("date").value = "";
+    document.getElementById("gram").value = "";
+    document.getElementById("alis").value = "";
+    document.getElementById("currency").value = "GA";
+    updateLabels();
+    document.getElementById("updateBtn").disabled = true;
+  }
+
+  function csvIndir() {
+    const rows = Array.from(document.querySelectorAll("#table tr")).map(row =>
+      Array.from(row.cells).map(cell => `"${cell.innerText}"`).join(",")
+    ).join("\\n");
+    const blob = new Blob([rows], { type: "text/csv" });
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = "birikim.csv";
+    a.click();
+  }
+
+  function csvYukle() {
+    const file = document.getElementById("csvInput").files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = function(e) {
+      const lines = e.target.result.split("\\n").slice(1);
+      for (let line of lines) {
+        const cols = line.split(",");
+        if (cols.length < 9) continue;
+        const tr = document.createElement("tr");
+        tr.innerHTML = cols.slice(0, 9).map((v, i) =>
+          `<td class="${i === 8 ? (parseFloat(v) >= 0 ? 'profit' : 'loss') : ''}">${v.replace(/"/g, "")}</td>`
+        ).join("") + '<td><button onclick="satirSil(this)">Sil</button></td>';
+        tr.onclick = () => satirSec(tr);
+        document.querySelector("#table tbody").appendChild(tr);
+      }
+      grafikGuncelle();
+    };
+    reader.readAsText(file);
+  }
+
+function grafikGuncelle() {
+  const rows = document.querySelectorAll("#table tbody tr");
+  const data = {};
+
+  rows.forEach(row => {
+    const curr = row.cells[1].innerText;
+    const tutar = parseFloat(row.cells[7].innerText);
+    data[curr] = (data[curr] || 0) + tutar;
+  });
+
+  const ctx = document.getElementById("chart").getContext("2d");
+  if (chart) chart.destroy();
+  chart = new Chart(ctx, {
+    type: "pie",
+    data: {
+      labels: Object.keys(data),
+      datasets: [{
+        data: Object.values(data),
+        backgroundColor: ["#f1c40f", "#3498db", "#2ecc71", "#9b59b6"]
+      }]
+    },
+    options: {
+      plugins: { legend: { labels: { color: "#fff" } } }
+    }
+  });
+
+  // ✅ Toplam Kâr/Zarar
+  let toplamFark = 0;
+  rows.forEach(row => {
+    toplamFark += parseFloat(row.cells[8].innerText);
+  });
+  const toplamDiv = document.getElementById("toplamKarZarar");
+  const renk = toplamFark >= 0 ? "#4caf50" : "#e74c3c";
+  toplamDiv.innerHTML = `Toplam Kâr/Zarar: <span style="color:${renk}">₺${toplamFark.toFixed(2)}</span>`;
+
+  // ✅ Her türün detaylı özetini ve toplam TL’yi yaz
+  let toplamlar = {
+    GA: { gram: 0, tutar: 0 },
+    USD: { tutar: 0 },
+    EUR: { tutar: 0 },
+    GBP: { tutar: 0 }
+  };
+
+  rows.forEach(row => {
+    const curr = row.cells[1].innerText;
+    const gram = parseFloat(row.cells[2].innerText);
+    const tutar = parseFloat(row.cells[7].innerText);
+    if (curr === "GA") {
+      toplamlar.GA.gram += gram;
+      toplamlar.GA.tutar += tutar;
+    } else if (toplamlar[curr]) {
+      toplamlar[curr].tutar += tutar;
+    }
+  });
+
+  const toplamTL = toplamlar.GA.tutar + toplamlar.USD.tutar + toplamlar.EUR.tutar + toplamlar.GBP.tutar;
+
+  document.getElementById("ozetAlani").innerHTML = `
+    <strong>Toplam Altın Gramı:</strong> ${toplamlar.GA.gram.toFixed(2)} gr<br>
+    <strong>Toplam Altın Tutarı:</strong> ₺${toplamlar.GA.tutar.toFixed(2)}<br>
+    <strong>Toplam Dolar Tutarı:</strong> ₺${toplamlar.USD.tutar.toFixed(2)}<br>
+    <strong>Toplam Euro Tutarı:</strong> ₺${toplamlar.EUR.tutar.toFixed(2)}<br>
+    <strong>Toplam Sterlin Tutarı:</strong> ₺${toplamlar.GBP.tutar.toFixed(2)}<br>
+    <hr style="margin:6px 0; border-color:#444;">
+    <strong style="font-size: 18px;">Toplam Birikim Tutarı:</strong> <span style="color:deepskyblue; font-weight:bold;">₺${toplamTL.toFixed(2)}</span>
+  `;
+}
+
+  function sortTable(n) {
+    const table = document.getElementById("table");
+    const tbody = table.tBodies[0];
+    const rows = Array.from(tbody.rows);
+
+    rows.sort((a, b) => {
+      let valA = a.cells[n].innerText;
+      let valB = b.cells[n].innerText;
+
+      if (!isNaN(valA) && !isNaN(valB)) {
+        valA = parseFloat(valA);
+        valB = parseFloat(valB);
+      }
+
+      return sortAsc ? (valA > valB ? 1 : -1) : (valA < valB ? 1 : -1);
+    });
+
+    tbody.innerHTML = "";
+    rows.forEach(row => tbody.appendChild(row));
+
+    sortAsc = lastSortedCol === n ? !sortAsc : true;
+    lastSortedCol = n;
+  }
+
+  window.onload = updateLabels;
+</script>
+</body>
+</html>
